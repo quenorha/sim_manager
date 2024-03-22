@@ -1,0 +1,117 @@
+#!/bin/bash
+
+
+PIN="0000"
+
+ledid="0x400100"  #LED USR
+
+logger -t "sim_manager" "Intialization..."
+
+
+function jsonval {
+    temp=`echo $1 | sed 's/\\\\\//\//g' | sed 's/[{}]//g' | awk -v k="text" '{n=split($0,a,","); for (i=1; i<=n; i++) print a[i]}' | sed 's/\"\:\"/\|/g' | sed 's/[\,]/ /g' | sed 's/\"//g' | grep -w $2`
+    echo ${temp##*|}
+}
+
+function getmodemstate {
+
+MODEMSTATE=$(/etc/config-tools/config_mdmd-ng -m get json)
+
+modem_state=$(jsonval $MODEMSTATE state)
+echo "get modem state..."
+logger -t "sim_manager" "get modem state..."
+
+}
+
+function getsimstate {
+SIMSTATE=$(/etc/config-tools/config_mdmd-ng --sim get json)
+
+sim_state=$(jsonval $SIMSTATE state)
+remaining=$(jsonval $SIMSTATE remaining)
+lock_type=$(jsonval $SIMSTATE lock_type)
+
+}
+
+function checkafterpininput {
+   getsimstate
+
+	if [ "$sim_state" == "sim_locked" ]; then
+
+
+        	if [ "$remaining" == 'remaining:3' ]; then
+                	eventmsg "${ledid}02"
+                	echo "setting PIN failed - SIM lock"
+			logger -t "sim_manager" "setting PIN failed - SIM lock"
+
+        	else
+                	eventmsg "${ledid}02"
+                	echo "setting PIN failed - PIN incorrect"
+			logger -t "sim_manager" "setting PIN failed - PIN incorrect"
+
+        	fi
+
+	else
+
+    		if [ "$sim_state" == "sim_ready" ]; then
+       			eventmsg "${ledid}01"
+       			echo "PIN successfully set - SIM now ready"
+			logger -t "sim_manager" "PIN successfully set - SIM now ready"
+			logger -t "sim_manager" "saving the PIN"
+			echo "saving the PIN"
+			/etc/config-tools/config_mdmd-ng --sim set pin=$PIN save=true
+
+
+    		fi
+	fi
+
+}
+
+
+eventmsg "${ledid}00"
+
+getmodemstate
+
+eventmsg "${ledid}03"
+
+
+while [ "$modem_state" != "ready" ]
+do
+	eventmsg "${ledid}00"
+	echo "Modem not ready or SIM not present... waiting 5s..."
+	logger -t "sim_manager" "Modem not ready or SIM not present... waiting 5s..."
+	sleep 1
+	eventmsg "${ledid}03"
+	sleep 4
+	getmodemstate
+
+done
+
+logger -t "sim_manager" "Modem ready..."
+echo "Modem ready..."
+getsimstate
+
+if [ "$sim_state" == "sim_locked" ]; then
+
+
+	if [ "$remaining" == 'remaining:3' ]; then
+		logger -t "sim_manager" "PIN not set... setting the PIN..."
+		echo "PIN not set... setting the PIN..."
+		/etc/config-tools/config_mdmd-ng --sim set pin=$PIN
+		sleep 5
+		checkafterpininput
+	else
+                eventmsg "${ledid}02"
+		echo "Attempt... cancelling"
+		 logger -t "sim_manager" "setting PIN failed - PIN incorrect"
+	fi
+
+else
+
+    if [ "$sim_state" == "sim_ready" ]; then
+       eventmsg "${ledid}01"
+       echo "PIN already set - SIM ready"
+       logger -t "sim_manager" "PIN already set - SIM ready"
+    fi
+fi
+
+
